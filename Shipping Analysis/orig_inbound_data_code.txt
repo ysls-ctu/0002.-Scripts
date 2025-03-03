@@ -1,0 +1,109 @@
+import csv
+import os
+import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+from webdriver_manager.chrome import ChromeDriverManager
+
+# open new chrome profile to run SC
+options = webdriver.ChromeOptions()
+options.add_experimental_option("detach", True)  
+service = Service(ChromeDriverManager().install())
+driver = webdriver.Chrome(service=service, options=options)
+
+driver.get("https://sellercentral.amazon.com")
+
+# manual log
+input("Log in to Seller Central and press Enter to continue...")
+
+# Navigate to Inventory Page
+driver.get("https://sellercentral.amazon.com/inventory")
+
+wait = WebDriverWait(driver, 15)
+
+# find the search box
+try:
+    # JS to access shadow DOM element
+    search_box = driver.execute_script(
+        "return document.querySelector('kat-input[unique-id=\"katal-id-1\"]').shadowRoot.querySelector('input')"
+    )
+    search_box.send_keys("B08MSZMYSW")  # trial ASIN
+    search_box.send_keys(Keys.RETURN)
+    print("Search box found via shadow DOM!")
+except:
+    try:
+        # Alternative: Locate by CLASS_NAME
+        search_box = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "SearchBox-module__searchInput--T3Fdk")))
+        search_box.send_keys("B08MSZMYSW") # trial ASIN
+        search_box.send_keys(Keys.RETURN)
+        print("Search box found via CLASS_NAME!")
+    except:
+        print("Error: Search box not found. Check page structure.")
+        driver.quit()
+        exit()
+
+# search results to load
+time.sleep(5)
+
+# automatically click the SKU link
+try:
+    sku_link = wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'JanusSplitBox-module__panel--AbYDg')]/a")))
+    product_url = sku_link.get_attribute("href")
+    driver.get(product_url)  # Open the product page
+    print("Navigated to product page:", product_url)
+except Exception as e:
+    print("Error navigating to product page:", str(e))
+    driver.quit()
+    exit()
+
+# product page loading
+time.sleep(5)
+
+save_path = r"C:\Users\User.DESKTOP-FC21VHI\Documents\SA"
+os.makedirs(save_path, exist_ok=True)
+
+current_date = datetime.datetime.now().strftime("%Y.%m.%d")
+csv_filename = os.path.join(save_path, f"{current_date} - Inbound Data.csv")
+
+if os.path.exists(csv_filename):
+    os.remove(csv_filename)
+    print(f"Existing file '{csv_filename}' deleted.")
+
+try:
+    # find the inbound table
+    inbound_table = wait.until(EC.presence_of_element_located((By.XPATH, "//kat-table-body")))
+
+    # find all rows
+    rows = inbound_table.find_elements(By.XPATH, ".//kat-table-row")
+
+    # file write to csv
+    with open(csv_filename, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        
+        writer.writerow(["Shipment ID", "Shipment Name", "Destination", "Last Updated", "Created", "Qty Shipped", "Qty Received", "Shipment Status"]) # header
+
+        for row in rows:
+            row_data = []
+
+            # Shipment ID (from <kat-link> tag)
+            shipment_id_element = row.find_element(By.XPATH, ".//kat-table-cell//kat-link")
+            shipment_id = shipment_id_element.get_attribute("label").strip() if shipment_id_element else "N/A"
+            row_data.append(shipment_id)
+
+            cells = row.find_elements(By.XPATH, ".//kat-table-cell//label") # row cell value extraction
+            row_data.extend([cell.text.strip() for cell in cells])
+            writer.writerow(row_data)
+
+    print(f"Data exported to {csv_filename}")
+
+except Exception as e:
+    print("Error extracting inbound data:", str(e))
+
+
+input("Press Enter to exit...")
+driver.quit()
